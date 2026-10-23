@@ -1,0 +1,15 @@
+# video-transcribe runtime dependencies (entry: video_transcribe.py).
+# The legacy orchestration stack (streamlit, spacy, demucs, whisper,
+# opencv, autocorrect, pydub, ...) was retired with the old core; see git
+# tag legacy-core-last for the previous requirements. The GPU inference
+# stack (torch/transformers/modelscope) mirrors the versions in .venv.
+numpy
+torch>=2.0.0
+transformers>=5.0.0
+modelscope
+soundfile
+openai>=1.0.0
+fastapi
+uvicorn
+ruamel.yaml
+yt-dlp
