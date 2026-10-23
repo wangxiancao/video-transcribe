@@ -57,6 +57,20 @@ def _wait_for_vram_return(timeout_s=10.0):
         previous = current
 
 
+MAX_ENGINE_CHUNKS = 120
+"""Engine chunks per invocation: the validated envelope (acceptance ran
+120-121 chunks). Longer audio auto-splits into consecutive windows; the
+chunk grid and shared prompt are unchanged, so results concatenate."""
+
+
+def _engine_windows(chunk_count, max_per_window=MAX_ENGINE_CHUNKS):
+    """Half-open [start, end) chunk windows, each inside the envelope."""
+    if max_per_window < 1:
+        raise StageError("max engine chunks per window must be >= 1")
+    return [(start, min(start + max_per_window, chunk_count))
+            for start in range(0, chunk_count, max_per_window)]
+
+
 def _engine_vram_budget_mib():
     """Cap the engine's VRAM reservation to what is actually free.
 
@@ -147,8 +161,8 @@ class NativeAsrBackend:
             if samples == 0:
                 raise StageError("decoded audio is empty")
             chunks = (samples + chunk_samples - 1) // chunk_samples
-            if chunks < 1 or chunks > 128:
-                raise StageError(f"native ASR supports 1..128 chunks, got {chunks}")
+            if chunks < 1:
+                raise StageError("decoded audio is empty")
             total_samples = chunks * chunk_samples
             if samples < total_samples:
                 # Real audio is never an exact 30 s multiple and the engine
@@ -170,26 +184,41 @@ class NativeAsrBackend:
             prompt_path = work / "prompt.txt"
             prompt_path.write_text("\n".join(map(str, prompt_ids)))
 
-            run = subprocess.run(
-                [str(self.binary), "transcribe", "--model-dir", str(self.model_dir),
-                 "--pcm-long", str(pcm_path), "--prompt-ids", str(prompt_path),
-                 "--max-vram-mib", str(_engine_vram_budget_mib())],
-                capture_output=True, text=True, timeout=7200,
-            )
-            if run.returncode != 0:
-                raise StageError(f"native ASR engine failed: {run.stderr.strip()[:300]}")
-            result = json.loads(run.stdout)
-            per_chunk = result["per_chunk_ids"]
-            if len(per_chunk) != chunks:
-                raise StageError(
-                    f"native ASR returned {len(per_chunk)} transcripts for {chunks} chunks")
-
-            texts = [
-                processor.tokenizer.decode(ids, skip_special_tokens=True).strip()
-                for ids in per_chunk
-            ]
-            # keep the (padded) samples for the alignment tail below
             pcm_all = np.fromfile(pcm_path, dtype=np.float32)
+            texts: list[str] = []
+            for window_start, window_end in _engine_windows(chunks):
+                # Long audio runs as consecutive engine invocations, each
+                # inside the validated envelope (acceptance ran 120-121
+                # chunks); the shared prompt and chunk grid are unchanged,
+                # so windows concatenate directly into the global chunk list.
+                window_path = work / f"window-{window_start:06d}.p32"
+                pcm_all[window_start * chunk_samples:
+                        window_end * chunk_samples].tofile(window_path)
+                run = subprocess.run(
+                    [str(self.binary), "transcribe", "--model-dir",
+                     str(self.model_dir), "--pcm-long", str(window_path),
+                     "--prompt-ids", str(prompt_path),
+                     "--max-vram-mib", str(_engine_vram_budget_mib())],
+                    capture_output=True, text=True, timeout=7200,
+                )
+                if run.returncode != 0:
+                    raise StageError(
+                        f"native ASR engine failed on chunks "
+                        f"{window_start}..{window_end}: "
+                        f"{run.stderr.strip()[:300]}"
+                    )
+                result = json.loads(run.stdout)
+                per_chunk = result["per_chunk_ids"]
+                if len(per_chunk) != window_end - window_start:
+                    raise StageError(
+                        f"native ASR returned {len(per_chunk)} transcripts "
+                        f"for {window_end - window_start} chunks "
+                        f"(window {window_start}..{window_end})"
+                    )
+                texts.extend(
+                    processor.tokenizer.decode(ids, skip_special_tokens=True).strip()
+                    for ids in per_chunk
+                )
             real_samples = samples
 
         spoken = [(index, text) for index, text in enumerate(texts) if text]

@@ -214,7 +214,19 @@ def _clamp_words(timestamps, offset, chunk_duration):
         start = offset + float(item["start_time"])
         end = offset + float(item["end_time"])
         if start < offset - 0.05 or start > chunk_end + MAX_OVERRUN:
-            raise StageError(f"forced aligner word starts outside its chunk: {start:.3f}s")
+            # Best-effort mandate: on noisy real-world audio (crosstalk,
+            # garble) the forced aligner occasionally emits an outlier
+            # timestamp far outside its chunk; clamp it back in and warn
+            # instead of failing a long run over one word. Observed on a
+            # 117-min meeting recording (word at -16.7s relative).
+            print(
+                f"transcribe: aligner outlier clamped into chunk "
+                f"[{offset:.1f}s, {chunk_end:.1f}s]: word {text[:12]!r} "
+                f"at {start:.3f}s",
+                file=sys.stderr,
+            )
+            start = min(max(start, offset), chunk_end - 0.001)
+            end = max(end, start)
         if start > chunk_end:
             start = max(offset, chunk_end - 0.001)
             end = chunk_end
