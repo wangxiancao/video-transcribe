@@ -9,6 +9,8 @@ import shutil
 import threading
 from pathlib import Path
 
+import pytest
+
 from pipeline.runner import run
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -240,7 +242,7 @@ class UntranslatableClient:
         ]})
 
 
-def test_translate_untranslatable_segment_falls_back_to_source(tmp_path, monkeypatch, capsys):
+def test_translate_untranslatable_segment_fails_without_source_echo(tmp_path, monkeypatch, capsys):
     import pipeline.stages.translate as translate_stage
 
     client = UntranslatableClient(poisoned_index=0)
@@ -259,11 +261,66 @@ def test_translate_untranslatable_segment_falls_back_to_source(tmp_path, monkeyp
     )
     config = _config(tmp_path, "translation:\n  cache: false\n")
 
-    assert run("translate", workdir, config) == 0
+    assert run("translate", workdir, config) == 1
+    assert not (workdir / "translation.json").exists()
+    assert "no valid translation" in capsys.readouterr().err
+
+
+def _single_segment_workdir(tmp_path):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    segments = [{
+        "id": 1, "start": 0.0, "end": 1.0, "text": "电麦搜",
+        "words": [{"start": 0.0, "end": 1.0, "text": "电麦搜"}],
+    }]
+    (workdir / "segments.json").write_text(
+        json.dumps({"schema_version": 1, "segments": segments}), encoding="utf-8"
+    )
+    return workdir
+
+
+def test_translate_rejected_refinement_uses_faithful_draft(tmp_path, monkeypatch, capsys):
+    import pipeline.stages.translate as translate_stage
+
+    def transform(texts, suffix):
+        if suffix == "refined":
+            return ["将原文润色为自然流畅的简体中文表达。"]
+        return ["合规忠实译文。"]
+
+    client = ArrayClient(transform=transform)
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
+    )
+    workdir = _single_segment_workdir(tmp_path)
+
+    assert run(
+        "translate", workdir, _config(tmp_path, "translation:\n  cache: false\n")
+    ) == 0
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
-    # single-segment empty translation falls back to echoing the raw source
-    assert data["segments"][0]["target"] == "电麦搜"
-    assert "untranslatable" in capsys.readouterr().err
+    assert data["segments"][0]["target"] == "合规忠实译文。"
+    assert "using faithful drafts" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "bad_response", ["将副标题翻译得符合目标语言表达习惯。", "长" * 89]
+)
+def test_translate_meta_or_overlong_faithful_response_fails(
+    tmp_path, monkeypatch, bad_response
+):
+    import pipeline.stages.translate as translate_stage
+
+    client = ArrayClient(transform=lambda texts, suffix: [bad_response])
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: client,
+    )
+    workdir = _single_segment_workdir(tmp_path)
+
+    assert run(
+        "translate", workdir, _config(tmp_path, "translation:\n  cache: false\n")
+    ) == 1
+    assert not (workdir / "translation.json").exists()
 
 
 def test_translate_tolerates_trailing_extra_json(tmp_path, monkeypatch):
@@ -285,3 +342,117 @@ def test_translate_tolerates_trailing_extra_json(tmp_path, monkeypatch):
                _config(tmp_path, "translation:\n  cache: false\n")) == 0
     data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
     assert data["segments"][0]["target"] == "t-1"
+
+
+def test_translate_repairs_q4_degenerate_json_overflow(tmp_path, monkeypatch):
+    """Replays the two real Q4 failures captured from the 66-min run.
+
+    The runtime drops the final closing quote and imitates the two-string
+    system-prompt example for single-segment batches; the stage repairs
+    the envelope and keeps the first translation instead of failing.
+    """
+    import pipeline.stages.translate as translate_stage
+
+    class DegenerateQ4Client:
+        def complete(self, system, user):
+            if "faithfully" in system.lower():
+                # Real cached response for segment "呃coder" (batch=1).
+                return '{"translations":["呃编码员。","呃编码员。]}'
+            # Real cached paraphrase-pair shape, healed the same way.
+            return '{"translations":["突然无法连接了。","突然连不上了。]}'
+
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: DegenerateQ4Client(),
+    )
+    workdir = _workdir(tmp_path)
+    assert run("translate", workdir,
+               _config(tmp_path, "translation:\n  cache: false\n"
+                                  "  batch_size: 1\n")) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    # The refined response is repaired the same way and wins over the
+    # faithful draft, so the first refined string is the final target.
+    assert data["segments"][0]["target"] == "突然无法连接了。"
+
+
+def test_parse_json_repairs_real_q4_envelope_degenerations():
+    from pipeline.stages.translate import _parse_json, StageError
+
+    # Missing closing quote before "]" (real cached response).
+    assert _parse_json('{"translations":["呃编码员。","呃编码员。]}') == {
+        "translations": ["呃编码员。", "呃编码员。"]
+    }
+    # Curly-quote terminator (real cached response).
+    assert _parse_json('{"translations":["对于ESNP来说，这是最大的。”]}') == {
+        "translations": ["对于ESNP来说，这是最大的。"]
+    }
+    # Missing comma between strings (real cached response).
+    assert _parse_json('{"translations":["全连接连接。" "全连接模式。"]}') == {
+        "translations": ["全连接连接。", "全连接模式。"]
+    }
+    # Valid JSON and irreparable junk keep their current behavior.
+    assert _parse_json('{"translations":["A"]}') == {"translations": ["A"]}
+    with pytest.raises(StageError):
+        _parse_json('{"translations":["A" "B。]}')
+
+
+def test_translate_collapses_stutter_amplification(tmp_path, monkeypatch, capsys):
+    """Real 66-min run failure: the stutter "更更更加可靠" translated
+    faithfully as "更加更加更加可靠。" trips the low-information gate;
+    the stage collapses the run instead of failing the whole output.
+    """
+
+    import pipeline.stages.translate as translate_stage
+
+    class StutterAmplifierClient:
+        def complete(self, system, user):
+            request = json.loads(user)
+            texts = request.get("segments") or request.get("drafts")
+            return json.dumps(
+                {"translations": ["更加更加更加可靠。" for _ in texts]}
+            )
+
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: StutterAmplifierClient(),
+    )
+    workdir = _workdir(tmp_path)
+    assert run("translate", workdir,
+               _config(tmp_path, "translation:\n  cache: false\n")) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert all(
+        segment["target"] == "更加可靠。" for segment in data["segments"]
+    )
+    assert "target collapsed" in capsys.readouterr().err
+
+
+def test_translate_rejects_refine_example_echo(tmp_path, monkeypatch, capsys):
+    """Real 66-min run leak: the refine pass echoed the prompt example
+    ("Refined first sentence.", "优化后的第一句翻译。") as the translation
+    for 37 segments. The gate rejects the echo and falls back to the
+    faithful draft.
+    """
+    import pipeline.stages.translate as translate_stage
+
+    class LeakyRefineClient:
+        def complete(self, system, user):
+            request = json.loads(user)
+            texts = request.get("segments") or request.get("drafts")
+            if "faithfully" in system.lower():
+                return json.dumps(
+                    {"translations": [f"译-{i + 1}" for i in range(len(texts))]}
+                )
+            return json.dumps(
+                {"translations": ["Refined first sentence." for _ in texts]}
+            )
+
+    monkeypatch.setattr(
+        translate_stage, "create_llm_client",
+        lambda _config, _fixture, _service=None: LeakyRefineClient(),
+    )
+    workdir = _workdir(tmp_path)
+    assert run("translate", workdir,
+               _config(tmp_path, "translation:\n  cache: false\n")) == 0
+    data = json.loads((workdir / "translation.json").read_text(encoding="utf-8"))
+    assert [segment["target"] for segment in data["segments"]] == ["译-1", "译-2"]
+    assert "echoes the prompt example" in capsys.readouterr().err

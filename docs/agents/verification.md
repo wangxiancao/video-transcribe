@@ -141,8 +141,8 @@ $PYTHON -m pipeline.runner --stages ingest --workdir "$WORK" --config "$WORK/con
 |------|------|
 | ingest | `media/source.mp4` 与 16k mono `media/audio.wav` 存在；时长/采样率正确；不做人声分离。阶段文档：`docs/agents/stages/ingest.md`。 |
 | transcribe | 语言、分段、词级时间戳完整；时间戳单调且在音频范围内；失败显式报错。阶段文档：`docs/agents/stages/transcribe.md`。 |
-| segment | 句子边界合理；词级时间戳不漂移；LLM 失败不静默留下未切句。 |
-| translate | 源文/译文结构完整；时间戳不变；两步流程可复现；失败显式报错。 |
+| segment | 规则边界合理；保留段的词级时间戳不漂移；独立填充词和病态重复被过滤，短回答保留，ID 重新连续编号。 |
+| translate | 源文/译文结构完整；时间戳不变；两步流程可复现；指令泄漏被拒绝，润色失败仅回退合规忠实译文，禁止源文回显和静默截断。 |
 | subtitle | 三份 SRT 均生成；编号/顺序/时间戳正确；显示长度约束成立。 |
 | burn | MP4 存在；时长/流正确；CJK 字体渲染正常；失败不输出黑色占位视频。 |
 | 性能（T2a/T2b） | 30s/1min/10min 的冷/热 RTFx、显存、批量；独立复跑；不改变阶段契约。T2a 报告：`docs/agents/rtfx-baseline.md`；T2b 报告：`docs/agents/rtfx-optimization.md`。 |

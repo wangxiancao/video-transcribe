@@ -160,3 +160,52 @@ def test_segment_rejects_empty_transcript(tmp_path, capsys):
     # runs; either way the run fails explicitly and writes no output.
     assert "invalid" in error
     assert not (workdir / "segments.json").exists()
+
+
+def test_segment_clamps_degenerate_overlap_instead_of_failing(tmp_path):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    words = [
+        {"start": 0.0, "end": 0.4, "text": "句一"},
+        {"start": 1.0, "end": 1.4, "text": "句二。"},
+        # Zero-duration aligner clamp overlapping the previous end by 1ms.
+        {"start": 1.399, "end": 1.4, "text": "A"},
+        {"start": 3.0, "end": 3.4, "text": "句三"},
+    ]
+    _write_transcript(workdir, _transcript_with_words(words, language="zh"))
+
+    assert run("segment", workdir, _config(tmp_path)) == 0
+
+    data = json.loads((workdir / "segments.json").read_text(encoding="utf-8"))
+    assert [segment["text"] for segment in data["segments"]] == [
+        "句一", "句二。", "A", "句三"
+    ]
+    degenerate = data["segments"][2]
+    assert degenerate["start"] == 1.4
+    assert round(degenerate["end"], 3) == 1.401
+    ends = [segment["start"] for segment in data["segments"]]
+    assert ends == sorted(ends)
+    assert all(
+        segment["end"] > segment["start"] for segment in data["segments"]
+    )
+
+
+def test_segment_filters_fillers_and_pathological_repetition(tmp_path):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    words = [
+        {"start": 0.0, "end": 0.2, "text": "嗯"},
+        {"start": 1.0, "end": 1.2, "text": "对"},
+        {"start": 2.0, "end": 2.2, "text": "呃"},
+        {"start": 3.0, "end": 3.2, "text": "嗯嗯"},
+        {"start": 4.0, "end": 4.5, "text": "我我我我我"},
+        {"start": 5.0, "end": 5.2, "text": "没有"},
+    ]
+    _write_transcript(workdir, _transcript_with_words(words, language="zh"))
+
+    assert run("segment", workdir, _config(tmp_path)) == 0
+
+    data = json.loads((workdir / "segments.json").read_text(encoding="utf-8"))
+    assert [segment["id"] for segment in data["segments"]] == [1, 2]
+    assert [segment["text"] for segment in data["segments"]] == ["对", "没有"]
+    assert [segment["start"] for segment in data["segments"]] == [1.0, 5.0]

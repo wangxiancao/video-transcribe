@@ -28,6 +28,12 @@ def make_service(tmp_path, **kwargs):
     return LocalLlmService(**defaults)
 
 
+@pytest.fixture(autouse=True)
+def reject_environment_proxy(monkeypatch):
+    monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:7897/")
+    monkeypatch.setenv("all_proxy", "socks://127.0.0.1:7897/")
+
+
 def test_stub_roundtrip(tmp_path):
     service = make_service(tmp_path)
     service.start()

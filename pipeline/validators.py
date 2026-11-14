@@ -4,6 +4,7 @@ import wave
 from typing import Any
 
 from pipeline.contracts import CodecError, ContractError, StageContext
+from pipeline.text_quality import has_translation_meta, is_low_information
 
 SCHEMA_VERSION = 1
 TIMESTAMP_TOLERANCE = 0.05
@@ -170,6 +171,13 @@ def validate_segments(ctx: StageContext) -> None:
     data = _check_schema(_read_json(ctx, "segments"), ctx, "segments")
     segments = _list(data.get("segments"), ctx, "segments", "segments")
     _validate_segments(segments, ctx, "segments", require_ids=True)
+    if ctx.config.get("segmentation.filter_low_information", True):
+        for index, segment in enumerate(segments):
+            if is_low_information(segment["text"]):
+                _fail(
+                    ctx, "segments",
+                    f"segments[{index}] contains low-information or repetitive text",
+                )
 
 
 def validate_translation(ctx: StageContext) -> None:
@@ -181,8 +189,16 @@ def validate_translation(ctx: StageContext) -> None:
     for index, raw_segment in enumerate(segments):
         field = f"segments[{index}]"
         segment = _mapping(raw_segment, ctx, "translation", field)
-        _text(segment.get("source"), ctx, "translation", f"{field}.source")
-        _text(segment.get("target"), ctx, "translation", f"{field}.target")
+        source = _text(segment.get("source"), ctx, "translation", f"{field}.source")
+        target = _text(segment.get("target"), ctx, "translation", f"{field}.target")
+        if ctx.config.get("segmentation.filter_low_information", True) and (
+            is_low_information(source) or is_low_information(target)
+        ):
+            _fail(ctx, "translation", f"{field} contains low-information or repetitive text")
+        if len(target) > 88:
+            _fail(ctx, "translation", f"{field}.target exceeds 88 characters")
+        if has_translation_meta(target):
+            _fail(ctx, "translation", f"{field}.target contains translator commentary")
 
     reference = _read_json(ctx, "segments")
     reference_segments = reference.get("segments") if isinstance(reference, dict) else None

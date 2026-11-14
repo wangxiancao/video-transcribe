@@ -366,6 +366,28 @@ def test_translation_validator_accepts_and_rejects_mismatch(tmp_path):
         validate_artifact(ctx, "translation")
 
 
+def test_segments_validator_rejects_low_information_text(tmp_path):
+    config = _write_config(tmp_path)
+    ctx = _context(tmp_path, config)
+    data = _valid_segments()
+    data["segments"][0]["text"] = "嗯"
+    ctx.write("segments", data)
+    with pytest.raises(ContractError, match="low-information"):
+        validate_artifact(ctx, "segments")
+
+
+def test_translation_validator_rejects_low_information_meta_and_overlong_targets(tmp_path):
+    config = _write_config(tmp_path)
+    ctx = _context(tmp_path, config)
+    ctx.write("segments", _valid_segments())
+    for target in ("嗯", "将副标题翻译得符合目标语言表达习惯。", "长" * 89):
+        bad = _valid_translation()
+        bad["segments"][0]["target"] = target
+        ctx.write("translation", bad)
+        with pytest.raises(ContractError):
+            validate_artifact(ctx, "translation")
+
+
 def test_translation_validator_rejects_timing_drift(tmp_path):
     config = _write_config(tmp_path)
     ctx = _context(tmp_path, config)

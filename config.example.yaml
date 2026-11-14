@@ -1,204 +1,77 @@
-# project: video-transcribe
-# -------------------
-# Copy this file to config.yaml and fill in your own keys.
+# video-transcribe configuration schema.
+# Copy to config.yaml. The pipeline reads but never writes this file.
 
-## ======================== Basic Settings ======================== ##
-
-display_language: "zh-CN"
-
-# API settings
+# External OpenAI-compatible fallback, used only when llm.local.enabled=false.
 api:
   key: 'your-api-key'
   base_url: 'https://api.deepseek.com'
   model: 'deepseek-v4-flash'
-  llm_support_json: false
-# *Number of LLM multi-threaded accesses, set to 1 if using local LLM
+
+# Concurrent translation batches. Use 1 for a single local model replica.
 max_workers: 4
 
-# *Managed local translation LLM (new pipeline only; spec V4).
-# *When enabled, the translate stage calls a project-spawned OpenAI-compatible
-# *server instead of api.* above; api.key is not read. The service starts before
-# *segment and stops after translate in every run; there is no cloud fallback.
+# Managed local translation service. No cloud fallback when startup fails.
 llm:
   local:
-    # Default ON: the product mandate is a self-contained local stack with no
-    # cloud API key (spec v0.4). Set false to fall back to api.* above.
     enabled: true
-    # llamacpp: official Q4_K_M GGUF on the STQ-built llama-server (V4-7:
-    # 1.7 GiB/replica, ~285 tok/s per replica). transformers: the BF16
-    # FastAPI fallback (~4.3 GiB/replica, ~32 tok/s).
+    # llamacpp: Q4_K_M GGUF; transformers: BF16 FastAPI fallback.
     runtime: 'llamacpp'
     replicas: 1
     gguf_path: '_model_cache/HY-MT2-1.8B-GGUF/Hy-MT2-1.8B-Q4_K_M.gguf'
     binary: 'native/llamacpp/llama.cpp/build/bin/llama-server'
-    # Subtitle-serving context bound; the 262K default would pre-allocate
-    # ~18 GiB of KV cache per replica.
-    ctx: 4096
-    # Segments per LLM request for this runtime: the Q4 GGUF misses the
-    # ordered-array contract more often at larger batches on garbled ASR
-    # content; 1..2 measured best. transformers stays reliable at 12.
-    batch_segments: 1
-    # transformers runtime weights (ignored when runtime is llamacpp)
     model_dir: '_model_cache/HY-MT2-1.8B'
+    # Bounded subtitle-serving context; large defaults allocate excessive KV cache.
+    ctx: 4096
+    # Q4 is most reliable with 1..2 segments per request; transformers supports 12.
+    batch_segments: 1
     host: '127.0.0.1'
-    # *0 = pick free ports automatically
+    # 0 selects free ports automatically.
     port: 0
-    # *Seconds to wait for model load + health before failing explicitly
     startup_timeout_s: 180
 
-# *Rule-based sentence segmentation for the segment stage (V4-3): cut on
-# *terminal punctuation, silence gaps, and length caps. Deterministic; no LLM.
+# Deterministic sentence segmentation; no LLM calls.
 segmentation:
   pause_s: 0.45
   max_words: 20
   max_duration_s: 8.0
+  # Drop standalone fillers and pathological repetition before translation.
+  filter_low_information: true
 
-# Language settings, written into the prompt, can be described in natural language
 target_language: '简体中文'
 
-# Whether to use Demucs for vocal separation before transcription
-demucs: true
-
-whisper:
-  # Whisper specified recognition language ISO 639-1
-  language: 'auto'
-  detected_language: 'en'
-
-# New pipeline ASR settings (GLM-ASR + Qwen3-ForcedAligner)
+# GLM-ASR + Qwen3-ForcedAligner. Weights must be downloaded before running.
 asr:
-  # Default: glm_asr_native (self-developed CUDA engine; needs the built
-  # binary below and runs 3.7x faster than transformers). glm_asr is the
-  # transformers/BF16 reference path — same transcript contract, no binary
-  # required. Unknown values fail explicitly.
-  backend: 'glm_asr_native'
+  backend: 'glm_asr_native'  # glm_asr_native or glm_asr (transformers fallback)
   native_binary: 'native/asr/build/glm_asr_m0'
-  # 'auto' detects zh/en/ja/ko/ru from the transcript; set an ISO code to override
+  # auto detects zh/en/ja/ko/ru; an ISO code overrides detection.
   language: 'auto'
-  # Audio chunk length in seconds; ForcedAligner accepts chunks well under 5 minutes
   chunk_seconds: 30
-  # Chunks per ASR/alignment batch (glm_asr only); 20 fits 24 GB with the
-  # best throughput. The stage halves the batch automatically on CUDA OOM.
+  # glm_asr only; the stage halves the batch on CUDA OOM.
   batch_size: 20
   max_new_tokens: 512
-  # ModelScope cache containing both models; weights stay outside the repository
   modelscope_cache: '~/.cache/modelscope'
 
-# Whether to burn subtitles into the video
-burn_subtitles: true
-
-# New-pipeline burn settings: libx264 (default, CPU) or h264_nvenc (GPU,
-# SSIM parity 0.9997 on the V4-7 O3 gate sample), plus keyframe-cut
-# parallel burning (chunks 1..8; 4 gives ~3x on a 2880x1800 60-min video).
+# Burn target.srt. chunks must be 1..8.
 burn:
-  encoder: 'libx264'
+  encoder: 'libx264'  # libx264 or h264_nvenc
   chunks: 4
 
-## ======================== Advanced Settings ======================== ##
-# *🔬 h264_nvenc GPU acceleration for ffmpeg, make sure your GPU supports it
-ffmpeg_gpu: false
-
-# *Youtube settings
 youtube:
+  # Used only when downloading a URL and the file exists.
   cookies_path: ''
 
-# *Default resolution for downloading YouTube videos [360, 1080, best]
-ytb_resolution: '1080'
-
 subtitle:
-  # *Maximum length of each subtitle line in characters
   max_length: 75
-  # *Translated subtitles are slightly larger than source subtitles, affecting the reference length for subtitle splitting
   target_multiplier: 1.2
-  # *Minimum cue duration; used to avoid over-splitting very short segments
   min_duration: 0.5
-  # *Maximum cue duration; longer segments are split even if they fit the character limit
   max_duration: 10.0
 
-# New pipeline translation settings
 translation:
-  # Segments per LLM request; requests for different batches run concurrently
   batch_size: 12
-  # Cache LLM responses under <workdir>/.llm-cache
   cache: true
-  # *Normalize known ASR garbles before text reaches the local LLM (V4-4).
-  # *Only the request payload is normalized; stored sources stay raw.
+  # Used only if language detection from the transcript fails.
+  source_language: 'auto'
+  # Normalize known ASR garbles in LLM requests; stored sources stay raw.
   term_map:
     '匹秒': '皮秒'
     '匹苗': '皮秒'
-
-# *Summary length, set low to 2k if using local LLM
-summary_length: 8000
-
-# *Maximum number of words for the first rough cut, below 18 will cut too finely affecting translation, above 22 is too long and will make subsequent subtitle splitting difficult to align
-max_split_length: 20
-
-# *Whether to reflect the translation result in the original text
-reflect_translate: true
-
-# *Whether to pause after extracting professional terms and before translation, allowing users to manually adjust the terminology table output\log\terminology.json
-pause_before_translate: false
-
-## ======================== Dubbing Settings ======================== ##
-# Only the user-implemented custom_tts hook is supported
-tts_method: 'custom_tts'
-
-# *Audio speed range
-speed_factor:
-  min: 1
-  accept: 1.2 # Maximum acceptable speed
-  max: 1.4
-
-# *Merge audio configuration
-min_subtitle_duration: 2.5 # Minimum subtitle duration, will be forcibly extended
-min_trim_duration: 3.5 # Subtitles shorter than this value won't be split
-tolerance: 1.5 # Allowed extension time to the next subtitle
-
-
-
-## ======================== Additional settings ======================== ##
-
-# Supported upload video formats
-allowed_video_formats:
-- 'mp4'
-- 'mov'
-- 'avi'
-- 'mkv'
-- 'flv'
-- 'wmv'
-- 'webm'
-
-allowed_audio_formats:
-- 'wav'
-- 'mp3'
-- 'flac'
-- 'm4a'
-
-# Spacy models
-spacy_model_map:
-  en: 'en_core_web_md'
-  ru: 'ru_core_news_md'
-  fr: 'fr_core_news_md'
-  ja: 'ja_core_news_md'
-  es: 'es_core_news_md'
-  de: 'de_core_news_md'
-  it: 'it_core_news_md'
-  zh: 'zh_core_web_md'
-
-# Languages that use space as separator
-language_split_with_space:
-- 'en'
-- 'es'
-- 'fr'
-- 'de'
-- 'it'
-- 'ru'
-
-# Languages that do not use space as separator
-language_split_without_space:
-- 'zh'
-- 'ja'
-
-whisper_asr:
-  # Whisper model for ASR transcription with word-level timestamps
-  model: 'openai/whisper-large-v3-turbo'
-  device: 'auto'  # auto/cuda/cpu

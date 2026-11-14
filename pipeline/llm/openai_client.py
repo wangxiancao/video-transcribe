@@ -3,20 +3,22 @@ from pipeline.llm.contracts import LlmError
 
 
 class OpenAICompatibleClient:
-    def __init__(self, api_key, base_url, model):
+    def __init__(self, api_key, base_url, model, trust_env=True):
         if not isinstance(api_key, str) or not api_key.strip() or api_key == "your-api-key":
             raise ConfigError("api.key must be set for LLM calls")
         if not isinstance(model, str) or not model.strip():
             raise ConfigError("api.model must be set for LLM calls")
         try:
-            from openai import OpenAI
+            from openai import DefaultHttpxClient, OpenAI
         except ImportError as exc:
             raise ConfigError("openai package is required for LLM calls") from exc
         self.model = model
+        http_client = None if trust_env else DefaultHttpxClient(trust_env=False)
         self._client = OpenAI(
             api_key=api_key,
             base_url=base_url or None,
             timeout=120,
+            http_client=http_client,
         )
 
     def complete(self, system: str, user: str) -> str:

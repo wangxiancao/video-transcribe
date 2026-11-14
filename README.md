@@ -76,12 +76,14 @@ cp config.example.yaml config.yaml    # 默认即全本地栈，开箱即用
 ## 用法
 
 ```bash
-python video_transcribe.py video.mp4                       # 全流程
-python video_transcribe.py video.mp4 --stages transcribe   # 只跑指定阶段
-python -m pipeline.runner --stages ... --validate-only ... # 只校验产物
+.venv/bin/python video_transcribe.py video.mp4                       # 全流程
+.venv/bin/python video_transcribe.py video.mp4 --stages transcribe   # 只跑指定阶段
+.venv/bin/python -m pipeline.runner --stages ... --validate-only ... # 只校验产物
 ```
 
-每个阶段可断点续跑（产物存在即跳过）；`runs/<name>/` 即工作目录。
+`runs/<name>/` 是工作目录。只执行 `--stages` 明确选择的阶段，不自动补跑前置阶段，也不按产物存在性跳过；重跑会重新计算所选阶段，翻译响应缓存默认保留。
+
+本地 LLM 请求不继承 Clash 等工具设置的环境代理。分段默认过滤独立填充词和病态重复；翻译器自述、无合规译文或超长译文会显式失败，不会回显源文或静默截断后烧录。
 
 ## 许可
 

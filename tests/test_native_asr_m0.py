@@ -11,6 +11,7 @@ they are skipped (not failed) when either is absent.
 import hashlib
 import json
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,15 @@ def run_loader(*args):
     )
 
 
+def reference_tensor_count():
+    path = MODEL_DIR / "model.safetensors"
+    with open(path, "rb") as handle:
+        header_length = int.from_bytes(handle.read(8), "little")
+        header = json.loads(handle.read(header_length))
+    return len(header) - int("__metadata__" in header)
+
+
+@lru_cache(maxsize=1)
 def reference_hashes():
     """Independent numpy BF16->FP16 conversion and SHA-256 of every tensor."""
     import numpy as np
@@ -65,8 +75,7 @@ def test_dump_plan_inventory_matches_reference():
     result = run_loader("--model-dir", str(MODEL_DIR), "--dump-plan")
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
-    reference = reference_hashes()
-    assert report["tensor_count"] == len(reference) == 745
+    assert report["tensor_count"] == reference_tensor_count() == 745
     assert report["missing_tensors"] == []
     assert report["unexpected_tensors"] == []
     assert report["shape_mismatches"] == []
@@ -75,6 +84,7 @@ def test_dump_plan_inventory_matches_reference():
     assert report["fp16_bytes"] == report["total_params"] * 2
 
 
+@pytest.mark.slow
 def test_cpu_conversion_hashes_match_numpy_reference():
     result = run_loader("--model-dir", str(MODEL_DIR), "--dump-plan", "--hash")
     assert result.returncode == 0, result.stderr
@@ -89,6 +99,7 @@ def test_cpu_conversion_hashes_match_numpy_reference():
     assert report["bf16_to_fp16"]["max_abs_value"] > 0
 
 
+@pytest.mark.slow
 def test_device_load_matches_numpy_reference():
     result = run_loader("--model-dir", str(MODEL_DIR), "--load")
     if result.returncode == 1 and "driver" in result.stderr.lower():
@@ -241,6 +252,7 @@ def load_speech_pcm():
     return pcm
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     not SPEECH_FIXTURE.is_file(), reason="30 s Mandarin speech fixture missing"
 )

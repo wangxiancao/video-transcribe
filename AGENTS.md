@@ -4,7 +4,7 @@
 
 video-transcribe 是一个**零云端依赖**的视频转录、翻译与字幕项目。默认入口是 **`video_transcribe.py`**（一条命令跑六阶段管线 `pipeline/`：ingest→transcribe→segment→translate→subtitle→burn）；60 分钟真实视频约 7.2 分钟出片（8.29 RTFx，双跑验证）。
 
-`runs/<name>/` 下的产物在一次运行期间是跨阶段契约（可按阶段断点续跑）。
+`runs/<name>/` 下的产物是跨阶段契约；可用 `--stages` 选择阶段重跑，但 runner 不按产物存在性自动跳过。
 
 ## 仓库结构
 
@@ -17,7 +17,7 @@ video-transcribe 是一个**零云端依赖**的视频转录、翻译与字幕�
 2. 不要在同一份 checkout 里并发跑流水线：它们共享 `runs/` 与显式 `--config`，锁只在进程内有效。
 3. 新配置键加到 `config.example.yaml`。管线只通过薄包装读取只读 `--config`，运行期不写 `config.yaml`；无关工作中不要覆盖本地 `config.yaml`。
 4. 改动保持聚焦。汇报受影响的阶段、验证证据，以及任何未测试的模型、GPU、API 或依赖媒体文件的路径。
-5. 本仓库无远端：改动走本地 feature 分支，验证通过后合入 `main`，提交信息聚焦可读。
+5. 远端为 GitHub wangxiancao/video-transcribe：改动走本地 feature 分支，验证通过后合入 `main` 并推送，提交信息聚焦可读。
 
 ## 编码准则
 
@@ -27,13 +27,13 @@ video-transcribe 是一个**零云端依赖**的视频转录、翻译与字幕�
 
 ## 测试说明
 
-`tests/` 是聚焦测试套件（runner/stages/llm 生命周期/服务多副本等；`.venv/bin/python -m pytest tests/ -q`；GPU/模型相关的按资产缺失自动跳过）。阶段级验证按 `docs/agents/verification.md`。
+`tests/` 是聚焦测试套件。默认 `.venv/bin/python -m pytest tests/ -q` 只跳过标记 `slow` 的昂贵真实模型对照；完整验收用 `.venv/bin/python -m pytest tests/ -q --run-slow`。GPU/模型相关测试在资产缺失时自动跳过。阶段级验证按 `docs/agents/verification.md`。
 
 - Python：`.venv/bin/python -m compileall -q video_transcribe.py pipeline`
 - 默认入口：`.venv/bin/python video_transcribe.py <video-or-url>`（产物落 `runs/`；阶段可 `--stages` 选择；`--validate-only` 只验产物）
 - 字幕烧录质量门：`bench/v4_7_burn_gate.py`；Q4 探针：`bench/v4_7_q4_probe.py`
 
-管线按产物存在性跳过已完成阶段、翻译缓存默认开启——重跑不等于干净重算。缺少所需服务与资产时，绝不声称端到端成功。
+管线不按产物存在性跳过阶段；所选阶段会重新执行，翻译缓存默认开启——重跑不等于干净重算。缺少所需服务与资产时，绝不声称端到端成功。
 
 ## 环境搭建
 
@@ -63,3 +63,11 @@ video-transcribe 是一个**零云端依赖**的视频转录、翻译与字幕�
 ### 验证
 
 阶段级验证按 `docs/agents/verification.md`；工具层复用判定见 `docs/agents/tool-audit.md`；夹具约定见 `tests/fixtures/README.md`。
+
+### Issue 仓库
+
+GitHub：`wangxiancao/video-transcribe` 的 Issues，用 `gh` CLI 操作。见 `docs/agents/issue-tracker.md`。
+
+### 分诊标签
+
+默认五角色：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。见 `docs/agents/triage-labels.md`。

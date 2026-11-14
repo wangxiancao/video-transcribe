@@ -8,7 +8,8 @@ segmentation) runs without hand-editing config — zero cloud dependency:
     python video_transcribe.py /path/to/video.mp4 --workdir runs/demo --stages ingest,transcribe
 
 Artifacts land in the workdir (transcript/segments/translation JSON,
-subs/*.srt, output.mp4); the workdir is resumable per stage.
+subs/*.srt, output.mp4). Selected stages rerun explicitly; existing artifacts
+are inputs and validation targets, not skip sentinels.
 """
 
 import argparse

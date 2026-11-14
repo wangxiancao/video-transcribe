@@ -73,8 +73,8 @@ def _check_llm_fixture(path: str | Path | None) -> Path | None:
 
 
 # Only translate calls the LLM since V4-3 moved segmentation to rules
-# (#32 decision 2026-10-23); the service still starts inside the D3 window
-# (after transcribe, before segment) for full runs because translate runs last.
+# (#32 decision 2026-10-23). When selected, the managed service starts before
+# the selected-stage loop and stops in the runner's finally block.
 LLM_STAGE_IDS = frozenset({"translate"})
 
 

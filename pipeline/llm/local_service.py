@@ -348,7 +348,8 @@ class LocalLlmService:
         clients = [
             OpenAICompatibleClient(api_key=self.api_key,
                                    base_url=replica.base_url,
-                                   model=self.model)
+                                   model=self.model,
+                                   trust_env=False)
             for replica in self._replicas
         ]
         return RoundRobinClient(clients) if len(clients) > 1 else clients[0]

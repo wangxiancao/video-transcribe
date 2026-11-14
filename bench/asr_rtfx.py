@@ -138,6 +138,7 @@ def _audio_info(path):
 
 
 def preflight(cache_dir=DEFAULT_CACHE, audio_paths=()):
+    models = _resolve_models(Path(cache_dir))
     _check_dependencies()
 
     import torch
@@ -148,7 +149,6 @@ def preflight(cache_dir=DEFAULT_CACHE, audio_paths=()):
         raise PreflightError("CUDA is not available; the RTFx baseline requires a GPU")
 
     properties = torch.cuda.get_device_properties(0)
-    models = _resolve_models(Path(cache_dir))
     return {
         "python": sys.version.split()[0],
         "torch": torch.__version__,

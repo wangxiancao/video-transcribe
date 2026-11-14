@@ -1,6 +1,8 @@
 import json
+import sys
 
 from pipeline.contracts import StageError
+from pipeline.text_quality import is_low_information
 
 # V4-3: rule-based segmentation (maintainer-approved fallback, #32 decision
 # 2026-10-23). The V4-1 spike showed HY-MT2-1.8B cannot segment reliably
@@ -85,7 +87,11 @@ def _build_segments(transcript, boundaries, language):
                 )
             segment_start = max(segment_start, previous_end)
             if segment_end <= segment_start:
-                raise StageError(f"segment: sentence {index} has invalid timing")
+                # A zero-duration aligner word can sit wholly inside the
+                # tolerated sub-50ms overlap window, so the start clamp can
+                # push past its end. Keep the cue strictly positive and
+                # monotonic instead of failing the stage.
+                segment_end = segment_start + 0.001
         previous_end = segment_end
         segments.append(
             {
@@ -125,4 +131,20 @@ def run(ctx) -> None:
         ),
     )
     segments = _build_segments(transcript, boundaries, transcript["language"])
+    if ctx.config.get("segmentation.filter_low_information", True):
+        kept = []
+        for segment in segments:
+            if is_low_information(segment["text"]):
+                continue
+            segment["id"] = len(kept) + 1
+            kept.append(segment)
+        dropped = len(segments) - len(kept)
+        if dropped:
+            print(
+                f"segment: filtered {dropped} low-information or repetitive segments",
+                file=sys.stderr,
+            )
+        segments = kept
+    if not segments:
+        raise StageError("segment: no informative segments remain after filtering")
     ctx.write("segments", {"schema_version": 1, "segments": segments})

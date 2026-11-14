@@ -7,6 +7,12 @@ from pipeline.contracts import ConfigError, StageError
 from pipeline.llm.cache import ResponseCache, cache_key
 from pipeline.llm.contracts import LlmError
 from pipeline.llm.factory import create_llm_client
+from pipeline.text_quality import (
+    collapse_pathological_repetition,
+    has_example_leak,
+    has_translation_meta,
+    is_low_information,
+)
 
 # Id-free ordered-array prompts (V4-7 O4). The earlier id-carrying JSON
 # protocol failed three ways on small models: echoed the placeholder schema
@@ -61,29 +67,67 @@ def _parse_json(text):
         # needs the first complete value, so take it and drop the tail.
         try:
             value, _ = json.JSONDecoder().raw_decode(text.lstrip())
+            return value
         except json.JSONDecodeError:
-            raise StageError(
-                f"translate: LLM returned invalid JSON: {exc}"
-            ) from exc
-        return value
+            pass
+        # Envelope repairs observed on the Q4 runtime: the final string
+        # loses its closing quote before "]" ('["A","B。]}'), terminates
+        # with a curly quote ('["A。”]}'), or two strings lose their
+        # separating comma ('["A" "B"]'). An unescaped quote-space-quote
+        # only occurs at string boundaries, so the comma insert is safe.
+        # Each candidate is validated by a full parse before use.
+        candidates = []
+        if text.endswith("”]}"):
+            candidates.append(text[:-3] + '"]}')
+        if text.endswith("]}"):
+            candidates.append(text[:-2] + '"]}')
+        candidates.append(text.replace('" "', '", "'))
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+        raise StageError(
+            f"translate: LLM returned invalid JSON: {exc}"
+        ) from exc
 
 
-def _parse_translation_strings(raw, expected_count):
+def _parse_translation_strings(raw, expected_count, refine_pass=False):
     """Validate an ordered-array response: one non-empty string per input."""
     data = _parse_json(raw)
     translations = data.get("translations") if isinstance(data, dict) else None
     if not isinstance(translations, list):
         raise StageError("translate: LLM response must contain a translations list")
     if len(translations) != expected_count:
-        raise StageError(
-            f"translate: expected {expected_count} translations, "
-            f"got {len(translations)}"
-        )
+        # The static system-prompt example carries two strings; the Q4
+        # runtime sometimes imitates that shape for a single-segment
+        # request, echoing the one translation twice (verbatim or as a
+        # paraphrase). Order is the contract, so translations[0] answers
+        # segments[0] and the extras are spurious — keep the first and let
+        # the per-item gates below still reject empty or meta-leaking text.
+        if expected_count == 1 and any(
+            isinstance(item, str) and item.strip() for item in translations
+        ):
+            translations = [translations[0]]
+        else:
+            raise StageError(
+                f"translate: expected {expected_count} translations, "
+                f"got {len(translations)}"
+            )
     result = []
     for index, item in enumerate(translations):
         if not isinstance(item, str) or not item.strip():
             raise StageError(f"translate: translation {index + 1} is empty")
-        result.append(item.strip())
+        value = item.strip()
+        if has_translation_meta(value):
+            raise StageError(
+                f"translate: translation {index + 1} contains translator commentary"
+            )
+        if refine_pass and has_example_leak(value):
+            raise StageError(
+                f"translate: translation {index + 1} echoes the prompt example"
+            )
+        result.append(value)
     return result
 
 
@@ -108,7 +152,7 @@ def _complete(client, cache, system, user):
     return response
 
 
-def _call_and_parse(client, cache, system, user, expected_count):
+def _call_and_parse(client, cache, system, user, expected_count, refine_pass=False):
     """One LLM round with a single retry on contract failure.
 
     Small models miss the ordered-array contract on garbled batches; a
@@ -117,12 +161,12 @@ def _call_and_parse(client, cache, system, user, expected_count):
     """
     raw = _complete(client, cache, system, user)
     try:
-        return _parse_translation_strings(raw, expected_count)
+        return _parse_translation_strings(raw, expected_count, refine_pass)
     except StageError:
         if cache is not None:
             cache.delete(cache_key(system, user))
         raw = _complete(client, cache, system, user)
-        return _parse_translation_strings(raw, expected_count)
+        return _parse_translation_strings(raw, expected_count, refine_pass)
 
 
 def _apply_term_map(text, term_map):
@@ -150,22 +194,11 @@ def _translate_batch(client, cache, segments, source_language, target_language,
         return _translate_batch_once(
             client, cache, segments, source_language, target_language, term_map
         )
-    except StageError:
+    except StageError as exc:
         if len(segments) == 1:
-            # Terminal fallback at the bisection floor (retry already ran):
-            # for untranslatable ASR fragments — empty strings, count drift
-            # on a single line — echo the raw source rather than failing the
-            # run or hallucinating. One segment at a time, always logged.
-            # The subtitle stage caps cue length, so cap the echo too.
-            source = _apply_term_map(segments[0]["text"], term_map).strip()
-            if len(source) > 87:
-                source = source[:87] + "…"
-            print(
-                f"translate: segment {segments[0]['id']} untranslatable "
-                f"({segments[0]['text'][:30]!r}); keeping the source text",
-                file=sys.stderr,
-            )
-            return [(segments[0]["id"], source)]
+            raise StageError(
+                f"translate: segment {segments[0]['id']} has no valid translation: {exc}"
+            ) from exc
         middle = len(segments) // 2
         return (
             _translate_batch(client, cache, segments[:middle],
@@ -188,19 +221,33 @@ def _translate_batch_once(client, cache, segments, source_language,
             client, cache, SYSTEM_FAITHFUL,
             json.dumps(faithful_request, ensure_ascii=False), len(texts),
         )
+    except LlmError as exc:
+        raise StageError(f"translate: LLM call failed: {exc}") from exc
+    if any(len(draft) > 88 for draft in drafts):
+        raise StageError("translate: faithful translation exceeds the 88-character limit")
 
-        refine_request = {
-            "source_language": source_language,
-            "target_language": target_language,
-            "sources": texts,
-            "drafts": drafts,
-        }
+    refine_request = {
+        "source_language": source_language,
+        "target_language": target_language,
+        "sources": texts,
+        "drafts": drafts,
+    }
+    try:
         refined = _call_and_parse(
             client, cache, SYSTEM_REFINE,
             json.dumps(refine_request, ensure_ascii=False), len(texts),
+            refine_pass=True,
         )
-    except LlmError as exc:
-        raise StageError(f"translate: LLM call failed: {exc}") from exc
+        if any(len(target) > 88 for target in refined):
+            raise StageError(
+                "translate: refined translation exceeds the 88-character limit"
+            )
+    except (StageError, LlmError) as exc:
+        print(
+            f"translate: refinement rejected ({exc}); using faithful drafts",
+            file=sys.stderr,
+        )
+        refined = drafts
     return [(segment["id"], refined[index]) for index, segment in enumerate(segments)]
 
 
@@ -259,16 +306,27 @@ def run(ctx) -> None:
 
     targets = {segment_id: target for batch in results for segment_id, target in batch}
     translated_segments = []
-    # The subtitle stage caps cue length (75 chars x 1.2 multiplier); very
-    # verbose translations of garbled run-ons would otherwise fail there
-    # when the segment is too short to split into more cues.
-    target_limit = 87
     for segment in segments:
         target = targets.get(segment["id"])
         if not target:
             raise StageError(f"translate: missing refined target for id {segment['id']}")
-        if len(target) > target_limit + 1:
-            target = target[:target_limit] + "…"
+        if is_low_information(target):
+            # A faithful rendering of a spoken stutter (更更更加可靠 ->
+            # 更加更加更加可靠) reads as pathological repetition in
+            # writing; collapse the run so the output gate holds. Still an
+            # explicit failure when the collapse does not heal the text.
+            collapsed = collapse_pathological_repetition(target).strip()
+            if collapsed and not is_low_information(collapsed):
+                print(
+                    f"translate: segment {segment['id']} target collapsed "
+                    f"({target[:30]!r} -> {collapsed[:30]!r})",
+                    file=sys.stderr,
+                )
+                target = collapsed
+        if len(target) > 88 or has_translation_meta(target):
+            raise StageError(
+                f"translate: segment {segment['id']} failed the output quality gate"
+            )
         translated_segments.append(
             {
                 "id": segment["id"],
