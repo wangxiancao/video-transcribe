@@ -5,6 +5,7 @@ from pipeline.stages.segment import run as run_segment
 from pipeline.stages.subtitle import run as run_subtitle
 from pipeline.stages.transcribe import run as run_transcribe
 from pipeline.stages.translate import run as run_translate
+from pipeline.stages.tts import run as run_tts
 
 
 ARTIFACTS = {
@@ -16,6 +17,8 @@ ARTIFACTS = {
     "srt_source": Artifact("srt_source", "subs/source.srt", "srt"),
     "srt_target": Artifact("srt_target", "subs/target.srt", "srt"),
     "srt_bilingual": Artifact("srt_bilingual", "subs/bilingual.srt", "srt"),
+    "dub_plan": Artifact("dub_plan", "tts/dub_plan.json", "json"),
+    "tts_audio": Artifact("tts_audio", "tts/tts.wav", "media"),
     "output_video": Artifact("output_video", "output.mp4", "media"),
 }
 
@@ -61,6 +64,16 @@ STAGES = (
         ("srt_source", "srt_target", "srt_bilingual"),
         ("_5_split_sub", "_6_gen_sub"),
         run_subtitle,
+    ),
+    # Dubbing runs only when explicitly selected (ADR-0003/0004): the
+    # six-stage subtitle product never synthesizes speech.
+    StageSpec(
+        "tts",
+        "Synthesize per-segment dubbing audio",
+        ("translation", "audio"),
+        ("dub_plan", "tts_audio"),
+        (),
+        run_tts,
     ),
     StageSpec(
         "burn",

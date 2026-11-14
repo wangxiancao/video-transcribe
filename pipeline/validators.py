@@ -4,7 +4,9 @@ import wave
 from typing import Any
 
 from pipeline.contracts import CodecError, ContractError, StageContext
+from pipeline.stages.tts import INPUT_MODES, spoken_field
 from pipeline.text_quality import has_translation_meta, is_low_information
+from pipeline.tts.fitting import DUB_SAMPLE_RATE, MAX_SPEED
 
 SCHEMA_VERSION = 1
 TIMESTAMP_TOLERANCE = 0.05
@@ -312,6 +314,136 @@ def validate_media(ctx: StageContext, key: str) -> None:
         raise ContractError(f"{key} ({path}): cannot stat file: {exc}") from exc
 
 
+def validate_dub_plan(ctx: StageContext) -> None:
+    data = _check_schema(_read_json(ctx, "dub_plan"), ctx, "dub_plan")
+    if data.get("input") not in INPUT_MODES:
+        _fail(ctx, "dub_plan", f"input must be one of {', '.join(INPUT_MODES)}")
+    _text(data.get("voice"), ctx, "dub_plan", "voice")
+    sample_rate = data.get("sample_rate")
+    if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
+        _fail(ctx, "dub_plan", "sample_rate must be a positive integer")
+    source_duration = _number(data.get("source_duration_s"), ctx, "dub_plan", "source_duration_s")
+    if source_duration <= 0:
+        _fail(ctx, "dub_plan", "source_duration_s must be > 0")
+    track_duration = _number(data.get("track_duration_s"), ctx, "dub_plan", "track_duration_s")
+
+    segments = _list(data.get("segments"), ctx, "dub_plan", "segments")
+    if not segments:
+        _fail(ctx, "dub_plan", "segments must not be empty")
+    translation = _read_json(ctx, "translation")
+    spoken = _list(
+        translation.get("segments"),
+        ctx, "dub_plan", "translation.segments",
+    )
+    if len(spoken) != len(segments):
+        _fail(ctx, "dub_plan", "segment count does not match translation.json")
+    spoken_name = spoken_field(data["input"])
+
+    overflow_total = 0.0
+    overflow_count = 0
+    max_placed_end = 0.0
+    for index, raw_segment in enumerate(segments):
+        field = f"segments[{index}]"
+        segment = _mapping(raw_segment, ctx, "dub_plan", field)
+        reference = _mapping(spoken[index], ctx, "dub_plan", f"translation.segments[{index}]")
+        if segment.get("id") != reference.get("id"):
+            _fail(ctx, "dub_plan", f"{field}.id does not match translation.json")
+        slot_start = _number(segment.get("slot_start"), ctx, "dub_plan", f"{field}.slot_start")
+        slot_end = _number(segment.get("slot_end"), ctx, "dub_plan", f"{field}.slot_end")
+        if slot_end <= slot_start:
+            _fail(ctx, "dub_plan", f"{field}.slot_end must be > slot_start")
+        if (
+            abs(slot_start - float(reference.get("start")))
+            > TIME_EQUAL_TOLERANCE
+            or abs(slot_end - float(reference.get("end"))) > TIME_EQUAL_TOLERANCE
+        ):
+            _fail(ctx, "dub_plan", f"{field} slot timing drifted from translation.json")
+        text = _text(segment.get("text"), ctx, "dub_plan", f"{field}.text")
+        if text != str(reference.get(spoken_name) or "").strip():
+            _fail(ctx, "dub_plan", f"{field}.text does not match translation.json")
+
+        synth = _number(
+            segment.get("synthesized_duration_s"), ctx, "dub_plan", f"{field}.synthesized_duration_s"
+        )
+        if synth <= 0:
+            _fail(ctx, "dub_plan", f"{field}.synthesized_duration_s must be > 0")
+        speed = _number(segment.get("speed_factor"), ctx, "dub_plan", f"{field}.speed_factor")
+        if speed <= 0 or speed > MAX_SPEED + 1e-9:
+            _fail(ctx, "dub_plan", f"{field}.speed_factor exceeds the {MAX_SPEED}x cap")
+        method = segment.get("method")
+        if method == "none":
+            if abs(speed - 1.0) > TIME_EQUAL_TOLERANCE:
+                _fail(ctx, "dub_plan", f"{field} fits without stretching but speed_factor is not 1.0")
+        elif method == "atempo":
+            if speed <= 1.0 + TIME_EQUAL_TOLERANCE:
+                _fail(ctx, "dub_plan", f"{field} stretched without needing it")
+        else:
+            _fail(ctx, "dub_plan", f"{field}.method must be 'none' or 'atempo'")
+
+        placed_start = _number(segment.get("placed_start"), ctx, "dub_plan", f"{field}.placed_start")
+        placed_end = _number(segment.get("placed_end"), ctx, "dub_plan", f"{field}.placed_end")
+        if abs(placed_start - slot_start) > TIME_EQUAL_TOLERANCE:
+            _fail(ctx, "dub_plan", f"{field} does not start at its slot")
+        if placed_end <= placed_start:
+            _fail(ctx, "dub_plan", f"{field}.placed_end must be > placed_start")
+        if abs((placed_end - placed_start) - synth / speed) > TIMESTAMP_TOLERANCE:
+            _fail(
+                ctx, "dub_plan",
+                f"{field} placed duration disagrees with measured synthesis",
+            )
+        overflow = _number(segment.get("overflow_s"), ctx, "dub_plan", f"{field}.overflow_s")
+        if abs(overflow - max(0.0, placed_end - slot_end)) > TIME_EQUAL_TOLERANCE:
+            _fail(ctx, "dub_plan", f"{field}.overflow_s is not the overrun past slot_end")
+        if overflow > 0:
+            overflow_count += 1
+            overflow_total += overflow
+        max_placed_end = max(max_placed_end, placed_end)
+
+    if track_duration < source_duration - TIME_EQUAL_TOLERANCE:
+        _fail(ctx, "dub_plan", "track_duration_s is shorter than the source audio")
+    if track_duration < max_placed_end - TIMESTAMP_TOLERANCE:
+        _fail(ctx, "dub_plan", "track_duration_s is shorter than the last placed segment")
+
+    summary = _mapping(data.get("overflow"), ctx, "dub_plan", "overflow")
+    if summary.get("count") != overflow_count:
+        _fail(ctx, "dub_plan", "overflow.count does not match the segments")
+    if abs(_number(summary.get("total_s"), ctx, "dub_plan", "overflow.total_s") - overflow_total) > TIME_EQUAL_TOLERANCE:
+        _fail(ctx, "dub_plan", "overflow.total_s does not match the segments")
+    ratio = _number(summary.get("ratio"), ctx, "dub_plan", "overflow.ratio")
+    if abs(ratio - overflow_total / source_duration) > 1e-6:
+        _fail(ctx, "dub_plan", "overflow.ratio does not match overflow.total_s")
+
+
+def validate_tts_audio(ctx: StageContext) -> None:
+    validate_media(ctx, "tts_audio")
+    plan = _mapping(_read_json(ctx, "dub_plan"), ctx, "tts_audio", "dub_plan")
+    try:
+        with wave.open(str(ctx.path("tts_audio")), "rb") as wav:
+            rate = wav.getframerate()
+            channels = wav.getnchannels()
+            duration = wav.getnframes() / float(rate) if rate > 0 else None
+    except (OSError, wave.Error) as exc:
+        _fail(ctx, "tts_audio", f"cannot read wav header: {exc}")
+        return
+    if duration is None:
+        _fail(ctx, "tts_audio", "wav sample rate must be > 0")
+    if rate != plan.get("sample_rate"):
+        _fail(ctx, "tts_audio", "wav sample rate disagrees with the plan")
+    if plan.get("sample_rate") != DUB_SAMPLE_RATE or channels != 1:
+        _fail(
+            ctx, "tts_audio",
+            f"dub track must be {DUB_SAMPLE_RATE} Hz mono, got "
+            f"{plan.get('sample_rate')} Hz {channels}ch",
+        )
+    track_duration = _number(plan.get("track_duration_s"), ctx, "tts_audio", "track_duration_s")
+    if abs(duration - track_duration) > TIMESTAMP_TOLERANCE:
+        _fail(
+            ctx, "tts_audio",
+            f"wav duration {duration:.3f}s differs from the plan by more than "
+            f"{TIMESTAMP_TOLERANCE:.2f}s",
+        )
+
+
 VALIDATORS = {
     "source_video": lambda ctx: validate_media(ctx, "source_video"),
     "audio": lambda ctx: validate_media(ctx, "audio"),
@@ -321,6 +453,8 @@ VALIDATORS = {
     "srt_source": lambda ctx: validate_srt(ctx, "srt_source"),
     "srt_target": lambda ctx: validate_srt(ctx, "srt_target"),
     "srt_bilingual": validate_srt_set,
+    "dub_plan": validate_dub_plan,
+    "tts_audio": validate_tts_audio,
     "output_video": lambda ctx: validate_media(ctx, "output_video"),
 }
 

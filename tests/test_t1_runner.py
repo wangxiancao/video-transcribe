@@ -473,6 +473,7 @@ def test_production_stage_table_is_consistent():
         "segment",
         "translate",
         "subtitle",
+        "tts",
         "burn",
     ]
     produced = {key for stage in STAGES for key in stage.produces}

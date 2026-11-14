@@ -75,3 +75,15 @@ translation:
   term_map:
     '匹秒': '皮秒'
     '匹苗': '皮秒'
+
+# Dubbing synthesis (ADR-0003/0004). The tts stage runs only with an explicit
+# `--stages tts`; the six-stage default never synthesizes speech.
+tts:
+  # Voice name from the library manifest (voices.json next to the clips).
+  voice: 'zh-female-01'
+  # Which translation.json field to speak: 'translated' (target) or 'source'.
+  input: 'translated'
+  # Cache synthesized segments (voice+text+speed keyed) under <workdir>/.tts-cache.
+  cache: true
+  # Named-voice library directory holding voices.json and the reference clips.
+  voices_dir: '_model_cache/tts_voices'
