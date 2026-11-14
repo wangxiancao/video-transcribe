@@ -2,9 +2,12 @@
 
 Consumes translation.json (tts.input selects the spoken field: the target
 by default, the source with input=source). Every segment is synthesized
-separately from a fixed reference voice (ADR-0004) and fitted into its
-speech slot with ffmpeg atempo, capped at 1.25x (ADR-0003); anything still
-longer overflows into the adjacent silence and is accounted in the plan.
+separately from a fixed reference voice (ADR-0004) at the configured native
+speed (tts.speed, ADR-0005 — the F5 reference clip sets the base pace, and
+the 1h acceptance showed a slow reference can never fit its slots) and
+fitted into its speech slot with ffmpeg atempo, capped at 1.25x (ADR-0003);
+anything still longer overflows into the adjacent silence and is accounted
+in the plan.
 
 The stage writes tts/dub_plan.json — every timestamp measured off the
 actual audio, never estimated — and tts/tts.wav, a silence bed of the
@@ -24,13 +27,17 @@ import soundfile as sf
 from pipeline.contracts import ConfigError, StageError
 from pipeline.tts.cache import SynthesisCache
 from pipeline.tts.factory import create_tts_engine
-from pipeline.tts.fitting import atempo_wav, plan_fit, wav_duration
+from pipeline.tts.fitting import (
+    MAX_SYNTH_SPEED,
+    MIN_SYNTH_SPEED,
+    atempo_wav,
+    plan_fit,
+    wav_duration,
+)
 from pipeline.tts.voices import VoiceLibrary
 
-# ADR-0004: fitting happens after synthesis, via atempo; synthesis itself
-# always runs at native speed. The speed stays in the cache key so a future
-# synthesis-speed knob cannot collide with entries made without it.
-SYNTH_SPEED = 1.0
+# The speed stays in the cache key (ADR-0004/0005): a synthesis made at one
+# speed can never be reused for another.
 DEFAULT_VOICE = "zh-female-01"
 # Which translation.json field the stage speaks; validators share this
 # single source so the stage and its contract cannot drift apart.
@@ -49,6 +56,19 @@ def _input_mode(config):
             f"tts.input must be one of {', '.join(INPUT_MODES)}, got {mode!r}"
         )
     return mode
+
+
+def _synth_speed(config):
+    """Native synthesis speed (ADR-0005); the engine range bounds it."""
+    speed = config.get("tts.speed", 1.0)
+    if isinstance(speed, bool) or not isinstance(speed, (int, float)):
+        raise ConfigError(f"tts.speed must be a number, got {speed!r}")
+    if not (MIN_SYNTH_SPEED <= speed <= MAX_SYNTH_SPEED):
+        raise ConfigError(
+            f"tts.speed must be within [{MIN_SYNTH_SPEED}, {MAX_SYNTH_SPEED}], "
+            f"got {speed}"
+        )
+    return float(speed)
 
 
 def _voice(config):
@@ -106,6 +126,7 @@ def _fit_samples(samples, sample_rate, decision):
 
 def run(ctx) -> None:
     mode = _input_mode(ctx.config)
+    speed = _synth_speed(ctx.config)
     voice = _voice(ctx.config)
     segments = ctx.read("translation")["segments"]
     if not segments:
@@ -124,12 +145,12 @@ def run(ctx) -> None:
         text = _speak_text(segment, mode)
         slot_start = float(segment["start"])
         slot_end = float(segment["end"])
-        key = SynthesisCache.key(voice.name, text, SYNTH_SPEED)
+        key = SynthesisCache.key(voice.name, text, speed)
         audio = cache.get(key) if cache else None
         if audio is None:
             if engine is None:
                 engine = _build_engine(ctx.config)
-            wav = engine.synth(text, voice, speed=SYNTH_SPEED)
+            wav = engine.synth(text, voice, speed=speed)
             samples = np.asarray(wav.samples, dtype="float32").reshape(-1)
             rate = int(wav.sample_rate)
             if cache:
@@ -198,6 +219,7 @@ def run(ctx) -> None:
             "schema_version": 1,
             "input": mode,
             "voice": voice.name,
+            "synth_speed": round(speed, 6),
             "sample_rate": sample_rate,
             "source_duration_s": round(source_duration, 6),
             "track_duration_s": round(track_frames / sample_rate, 6),

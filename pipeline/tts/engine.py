@@ -13,6 +13,8 @@ from pathlib import Path
 
 import torch
 
+from pipeline.tts.fitting import MAX_SYNTH_SPEED, MIN_SYNTH_SPEED
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CKPT_FILE = REPO_ROOT / "_model_cache" / "F5-TTS-Emilia-ZH-EN" / "model_1250000.safetensors"
 DEFAULT_VOCAB_FILE = REPO_ROOT / "_model_cache" / "F5-TTS-Emilia-ZH-EN" / "vocab.txt"
@@ -107,8 +109,11 @@ class F5TTSEngine:
         """Synthesize one segment; duration is measured off the actual audio."""
         if not text.strip():
             raise ValueError("synthesis text is empty")
-        if not (0.5 <= speed <= 2.0):
-            raise ValueError(f"speed out of supported range [0.5, 2.0]: {speed}")
+        if not (MIN_SYNTH_SPEED <= speed <= MAX_SYNTH_SPEED):
+            raise ValueError(
+                f"speed out of supported range "
+                f"[{MIN_SYNTH_SPEED}, {MAX_SYNTH_SPEED}]: {speed}"
+            )
         wav, sr, _spec = self.model.infer(
             ref_file=str(voice.ref_audio),
             ref_text=voice.ref_text,
