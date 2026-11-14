@@ -1,6 +1,6 @@
 # video-transcribe 核心执行链
 
-当前产品默认是一条六阶段、文件驱动的单向流水线。唯一产品入口是 `video_transcribe.py`；阶段注册表是 `pipeline/registry.py`，运行器是 `pipeline/runner.py`。旧版 Whisper、Excel、spaCy 和猴补丁链路已经移除；配音（tts，dub 后续接入）按 ADR-0003/0004 重建，只在显式 `--stages` 时执行，六阶段默认行为不变。
+当前产品默认是一条六阶段、文件驱动的单向流水线。唯一产品入口是 `video_transcribe.py`；阶段注册表是 `pipeline/registry.py`，运行器是 `pipeline/runner.py`。旧版 Whisper、Excel、spaCy 和猴补丁链路已经移除；配音（tts、dub）按 ADR-0003/0004 重建，只在显式 `--stages` 时执行，六阶段默认行为不变。
 
 ## 数据流与产物
 
@@ -13,7 +13,7 @@
              └─ subtitle → subs/{source,target,bilingual}.srt
                 ├─ burn   → output.mp4（烧录 target.srt）
                 └─ tts    → tts/dub_plan.json + tts/tts.wav（显式 --stages）
-                   └─ dub → output_dub.mp4（整轨替换，后续票）
+                   └─ dub → output_dub.mp4（整轨替换）
 ```
 
 | 阶段 | 输入 | 输出 | 实现要点 |
@@ -24,6 +24,7 @@
 | translate | `segments.json` | `translation.json` | HY-MT2 两轮翻译；有序字符串数组协议；时间戳逐项复制 |
 | subtitle | `translation.json` | 三份 SRT | 源文、译文按同一时间轴拆分；JSON/SRT 原子写入 |
 | tts | `translation.json`、`media/audio.wav` | `tts/dub_plan.json`、`tts/tts.wav` | 逐段 F5-TTS 合成（命名音色库，ADR-0004）；槽内 ffmpeg atempo 变速上限 1.25×（ADR-0003），超长溢出记账不截断；plan 时间戳全部来自实测音频 |
+| dub | `media/source.mp4`、`tts/tts.wav` | `output_dub.mp4` | 视频流直拷；音轨整轨替换为 AAC 配音轨（ADR-0003，不保留/不混入背景音）；时长差 ≤0.5s 契约门；临时文件验证通过后原子替换；字幕烧录不归 dub |
 | burn | 源视频、`target.srt` | `output.mp4` | 只烧录目标语言字幕；支持关键帧并行、libx264/h264_nvenc、时长校验 |
 
 runner 只执行 `--stages` 明确选择的阶段，并始终按注册表顺序执行。它不会自动补跑前置阶段，也不会因为产物存在而跳过阶段。重跑会重新计算所选阶段；翻译 LLM 响应缓存默认开启，因此重跑不等于完全无缓存计算。
@@ -39,6 +40,7 @@ runner 只执行 `--stages` 明确选择的阶段，并始终按注册表顺序�
 - `tts/dub_plan.json`：`input/voice/sample_rate/source_duration_s/track_duration_s` + `segments[]`（每段 `id/slot_start/slot_end/text/synthesized_duration_s/speed_factor/method/placed_start/placed_end/overflow_s`）+ `overflow`（`count/total_s/ratio`）。段数、ID、槽时间戳与 `translation.json` 一致（`tts.input` 决定 `text` 对应 `target` 还是 `source` 字段）；`method ∈ {none, atempo}`；`speed_factor ≤ 1.25`（固定契约，不进配置）；`placed_start = slot_start`（不截断不位移）；`overflow_s = max(0, placed_end - slot_end)`。
 - `tts/tts.wav`：24 kHz 单声道 PCM16 整轨；静音底长度等于源音频，末段溢出可延长整轨；时长与 plan `track_duration_s` 相差不超过 50 ms；非语音区间保持静音。
 - 视频：烧录输出必须同时含音视频流，时长与源视频相差不超过 0.5 秒。
+- `output_dub.mp4`：`media/source.mp4` 的视频流直拷 + `tts/tts.wav` 整轨替换为 AAC（96 kbit/s，24 kHz 单声道）；必须同时含音视频流，时长与源视频相差不超过 0.5 秒；配音轨超长溢出源视频超出契约门时 dub 失败，不截断语音（ADR-0003）；字幕烧录不归 dub，`output.mp4` 与 `output_dub.mp4` 相互独立。
 
 ## 文本质量门
 
@@ -65,6 +67,6 @@ TTS 合成缓存在 `<workdir>/.tts-cache/`，键 = 音色 + 段文本 + 合成�
 
 - 媒体缺失、模型缺失、 native 二进制缺失、LLM 服务启动失败均显式报错，不自动切换云端。
 - ASR/对齐器输出必须满足词级时间戳契约；异常越界词按现有 best-effort 规则钳制并警告，严重回退或空结果失败。
-- 分段全部过滤、忠实翻译无合规结果、SRT 契约破坏或烧录时长漂移都会使运行非零退出。
+- 分段全部过滤、忠实翻译无合规结果、SRT 契约破坏或烧录/配音时长漂移都会使运行非零退出。
 - tts 的变速上限 1.25× 是固定契约；超长溢出不判阶段失败，逐段记账进 plan 并在 stderr 告警，累计溢出（≤总时长 2%）由 bench 验收门量化判定。
-- `output.mp4` 使用临时文件，验证通过后才原子替换。不要在同一 workdir 并发运行流水线。
+- `output.mp4` 与 `output_dub.mp4` 都使用临时文件，验证通过后才原子替换。不要在同一 workdir 并发运行流水线。

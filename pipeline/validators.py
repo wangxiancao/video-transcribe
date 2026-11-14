@@ -456,6 +456,7 @@ VALIDATORS = {
     "dub_plan": validate_dub_plan,
     "tts_audio": validate_tts_audio,
     "output_video": lambda ctx: validate_media(ctx, "output_video"),
+    "output_dub": lambda ctx: validate_media(ctx, "output_dub"),
 }
 
 
