@@ -37,3 +37,15 @@ _Avoid_: engine as model
 **ForceAligner**:
 The inference path for the official Qwen3-ForcedAligner-0.6B weights that produces word-level timestamps; it stays on transformers (ADR-0002).
 _Avoid_: aligner (unqualified)
+
+**Dubbing (配音)**:
+Replacing the video's original audio track with synthesized speech; the chosen TTS delivery form, as opposed to a standalone read-aloud audio.
+_Avoid_: dub (unqualified), TTS video (ambiguous)
+
+**Voice (音色)**:
+The fixed speaker identity synthesis uses, picked from a named catalog; voice cloning (学习音色) is the optional extension that adds a new catalog entry.
+_Avoid_: speaker (ambiguous with ASR speakers), timbre
+
+**Drift (漂移)**:
+Error accumulating over long synthesis runs, in two accepted senses: timeline drift (subtitle/audio timestamps disagreeing with actual audio) and timbre drift (voice quality degrading as synthesis proceeds). Both are gated by acceptance.
+_Avoid_: 偏移 (ambiguous), lag
