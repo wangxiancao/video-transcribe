@@ -1,5 +1,6 @@
 from pipeline.contracts import Artifact, StageSpec
 from pipeline.stages.burn import run as run_burn
+from pipeline.stages.dub import run as run_dub
 from pipeline.stages.ingest import run as run_ingest
 from pipeline.stages.segment import run as run_segment
 from pipeline.stages.subtitle import run as run_subtitle
@@ -20,6 +21,7 @@ ARTIFACTS = {
     "dub_plan": Artifact("dub_plan", "tts/dub_plan.json", "json"),
     "tts_audio": Artifact("tts_audio", "tts/tts.wav", "media"),
     "output_video": Artifact("output_video", "output.mp4", "media"),
+    "output_dub": Artifact("output_dub", "output_dub.mp4", "media"),
 }
 
 
@@ -74,6 +76,16 @@ STAGES = (
         ("dub_plan", "tts_audio"),
         (),
         run_tts,
+    ),
+    # Dub muxes the synthesized track over the source video (ADR-0003);
+    # subtitle burning stays in burn, the two outputs are independent.
+    StageSpec(
+        "dub",
+        "Mux the dub track into the source video",
+        ("source_video", "tts_audio"),
+        ("output_dub",),
+        (),
+        run_dub,
     ),
     StageSpec(
         "burn",

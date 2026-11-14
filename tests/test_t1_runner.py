@@ -474,6 +474,7 @@ def test_production_stage_table_is_consistent():
         "translate",
         "subtitle",
         "tts",
+        "dub",
         "burn",
     ]
     produced = {key for stage in STAGES for key in stage.produces}
@@ -481,6 +482,7 @@ def test_production_stage_table_is_consistent():
     assert ARTIFACTS["transcript"].relpath == "transcript.json"
     assert ARTIFACTS["srt_bilingual"].relpath == "subs/bilingual.srt"
     assert ARTIFACTS["output_video"].relpath == "output.mp4"
+    assert ARTIFACTS["output_dub"].relpath == "output_dub.mp4"
 
 
 def test_validate_registry_rejects_invalid_tables():
