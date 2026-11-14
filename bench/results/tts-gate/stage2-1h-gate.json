@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "tool": "tts_gate",
+  "workdir": "runs/tts-accept-1h-stage2",
+  "config": "/tmp/tts-accept-config-stage2.yaml",
+  "gates": {
+    "overflow_ratio": {
+      "value": 0.003658,
+      "threshold": 0.02,
+      "verdict": "PASS",
+      "overflow_count": 34,
+      "total_s": 14.396332,
+      "plan_consistent": true
+    },
+    "timeline_spot_check_s": {
+      "value": 0.0,
+      "threshold": 0.05,
+      "verdict": "PASS",
+      "metric": "max sound beyond a declared window boundary (start or end), overlap-covered boundaries skipped",
+      "sampled": [
+        {
+          "id": 1,
+          "placed_start": 0.4,
+          "placed_end": 2.704,
+          "onset_after_placed_start_s": 0.332375,
+          "speech_presence": 0.8401,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 117,
+          "placed_start": 514.96,
+          "placed_end": 517.264,
+          "onset_after_placed_start_s": 0.295958,
+          "speech_presence": 0.8537,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 234,
+          "placed_start": 1008.96,
+          "placed_end": 1010.762667,
+          "onset_after_placed_start_s": 0.340375,
+          "speech_presence": 0.7882,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 351,
+          "placed_start": 1495.12,
+          "placed_end": 1496.112,
+          "onset_after_placed_start_s": 0.253667,
+          "speech_presence": 0.7127,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 467,
+          "placed_start": 1971.84,
+          "placed_end": 1974.250667,
+          "onset_after_placed_start_s": 0.325625,
+          "speech_presence": 0.8496,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 583,
+          "placed_start": 2471.92,
+          "placed_end": 2475.162667,
+          "onset_after_placed_start_s": 0.254792,
+          "speech_presence": 0.906,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 700,
+          "placed_start": 2977.601,
+          "placed_end": 2980.609,
+          "onset_after_placed_start_s": 0.424292,
+          "speech_presence": 0.8409,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 817,
+          "placed_start": 3452.56,
+          "placed_end": 3453.754667,
+          "onset_after_placed_start_s": 0.505792,
+          "speech_presence": 0.5422,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 933,
+          "placed_start": 3933.76,
+          "placed_end": 3934.400542,
+          "onset_after_placed_start_s": 0.206083,
+          "speech_presence": 0.6565,
+          "boundary_violation_s": 0.0
+        }
+      ],
+      "failures": []
+    },
+    "dub_duration_drift_s": {
+      "value": 0.009,
+      "threshold": 0.5,
+      "verdict": "PASS",
+      "dub_duration_s": 3935.57,
+      "source_duration_s": 3935.561,
+      "dub_streams": [
+        {
+          "codec_type": "video",
+          "codec_name": "h264"
+        },
+        {
+          "codec_type": "audio",
+          "codec_name": "aac"
+        }
+      ],
+      "streams_ok": true
+    },
+    "tts_rtf": {
+      "value": 0.258742,
+      "threshold": 0.5,
+      "verdict": "PASS",
+      "metric": "wall_s / media_s, cold (includes model load), ADR-0004 convention",
+      "wall_s": 1018.29,
+      "media_s": 3935.527,
+      "exit_code": 0,
+      "scratch_synthesis_ok": true,
+      "stderr_tail": "100%|██████████| 1/1 [00:00<00:00,  1.00it/s]\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|██████████| 1/1 [00:00<00:00,  1.05it/s]\n100%|██████████| 1/1 [00:00<00:00,  1.05it/s]\ntts: segment 930 overflows its slot by 0.082s (fitted 0.482s into 0.400s at 1.25x)\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|██████████| 1/1 [00:01<00:00,  1.02s/it]\n100%|██████████| 1/1 [00:01<00:00,  1.02s/it]\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|██████████| 1/1 [00:01<00:00,  1.05s/it]\n100%|██████████| 1/1 [00:01<00:00,  1.05s/it]\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|██████████| 1/1 [00:00<00:00,  1.04it/s]\n100%|██████████| 1/1 [00:00<00:00,  1.04it/s]\ntts: segment 933 overflows its slot by 0.001s (fitted 0.641s into 0.640s at 1.08x)\ntts: total slot overflow 14.396s (0.37% of 3935.5s source audio)"
+    },
+    "vram_growth_mb": {
+      "value": 10.0,
+      "threshold": 256.0,
+      "verdict": "PASS",
+      "metric": "p95(last third) - p95(first third) after the first-half load peak, MiB",
+      "reason": null,
+      "baseline_mib": 1259.0,
+      "peak_mib": 2416.0,
+      "sample_count": 970,
+      "sampler_error": null,
+      "note": "samples are total GPU memory.used (MiB), shared with other processes"
+    }
+  },
+  "track_info": {
+    "path": "runs/tts-accept-1h-stage2/tts/tts.wav",
+    "sample_rate": 24000,
+    "channels": 1,
+    "subtype": "PCM_16",
+    "measured_duration_s": 3935.526875,
+    "plan_track_duration_s": 3935.526875,
+    "plan_sample_rate": 24000,
+    "voice": "zh-male-01",
+    "matches_plan": true
+  },
+  "overall": "PASS"
+}
