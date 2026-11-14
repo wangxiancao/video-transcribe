@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "tool": "tts_gate",
+  "workdir": "/tmp/tts-gate-short",
+  "config": "/tmp/tts-gate-short-config.yaml",
+  "gates": {
+    "overflow_ratio": {
+      "value": 0.448015,
+      "threshold": 0.02,
+      "verdict": "FAIL",
+      "overflow_count": 2,
+      "total_s": 13.440459,
+      "plan_consistent": true
+    },
+    "timeline_spot_check_s": {
+      "value": 0.0,
+      "threshold": 0.05,
+      "verdict": "PASS",
+      "metric": "max sound beyond a declared window boundary (start or end), overlap-covered boundaries skipped",
+      "sampled": [
+        {
+          "id": 1,
+          "placed_start": 0.5,
+          "placed_end": 16.366417,
+          "onset_after_placed_start_s": 0.3525,
+          "speech_presence": 0.9509,
+          "boundary_violation_s": 0.0
+        },
+        {
+          "id": 2,
+          "placed_start": 4.0,
+          "placed_end": 7.074042,
+          "onset_after_placed_start_s": 0.0,
+          "speech_presence": 0.9921,
+          "boundary_violation_s": 0.0
+        }
+      ],
+      "failures": []
+    },
+    "dub_duration_drift_s": {
+      "value": 0.043,
+      "threshold": 0.5,
+      "verdict": "PASS",
+      "dub_duration_s": 30.043,
+      "source_duration_s": 30.0,
+      "dub_streams": [
+        {
+          "codec_type": "video",
+          "codec_name": "h264"
+        },
+        {
+          "codec_type": "audio",
+          "codec_name": "aac"
+        }
+      ],
+      "streams_ok": true
+    },
+    "tts_rtf": {
+      "value": 0.536542,
+      "threshold": 0.5,
+      "verdict": "FAIL",
+      "metric": "wall_s / media_s, cold (includes model load), ADR-0004 convention",
+      "wall_s": 16.1,
+      "media_s": 30.0,
+      "exit_code": 0,
+      "scratch_synthesis_ok": true,
+      "stderr_tail": "212: FutureWarning: You are using a non-supported Python version (3.10.19). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.11, and then update google.api_core.\n  warnings.warn(message, FutureWarning)\n\n  0%|          | 0/2 [00:00<?, ?it/s]\n 50%|█████     | 1/2 [00:03<00:03,  3.56s/it]\n100%|██████████| 2/2 [00:03<00:00,  1.80s/it]\ntts: segment 1 overflows its slot by 12.366s (fitted 15.866s into 3.500s at 1.25x)\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|██████████| 1/1 [00:01<00:00,  1.15s/it]\n100%|██████████| 1/1 [00:01<00:00,  1.15s/it]\ntts: segment 2 overflows its slot by 1.074s (fitted 3.074s into 2.000s at 1.25x)\ntts: total slot overflow 13.440s (44.80% of 30.0s source audio)"
+    },
+    "vram_growth_mb": {
+      "value": -298.4,
+      "threshold": 256.0,
+      "verdict": "PASS",
+      "metric": "p95(last third) - p95(first third) after the first-half load peak, MiB",
+      "reason": null,
+      "baseline_mib": 1475.0,
+      "peak_mib": 3199.0,
+      "sample_count": 16,
+      "sampler_error": null,
+      "note": "samples are total GPU memory.used (MiB), shared with other processes"
+    }
+  },
+  "track_info": {
+    "path": "/tmp/tts-gate-short/tts/tts.wav",
+    "sample_rate": 24000,
+    "channels": 1,
+    "subtype": "PCM_16",
+    "measured_duration_s": 30.0,
+    "plan_track_duration_s": 30.0,
+    "plan_sample_rate": 24000,
+    "voice": "zh-female-01",
+    "matches_plan": true
+  },
+  "overall": "FAIL"
+}
