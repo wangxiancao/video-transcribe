@@ -441,7 +441,14 @@ int run_transcribe(int argc, char** argv) {
               << "  \"generated_ids\": [";
     for (size_t i = 0; i < decoded.generated_ids.size(); ++i)
       std::cout << (i ? ", " : "") << decoded.generated_ids[i];
-    std::cout << "]\n}\n";
+    // Single-chunk runs mirror the batched schema: the tool's windowed
+    // path reads per_chunk_ids unconditionally (#8); generated_ids stays
+    // for the direct-engine test contract.
+    std::cout << "],\n"
+              << "  \"per_chunk_ids\": [[";
+    for (size_t i = 0; i < decoded.generated_ids.size(); ++i)
+      std::cout << (i ? ", " : "") << decoded.generated_ids[i];
+    std::cout << "]]\n}\n";
     return 0;
   }
 
