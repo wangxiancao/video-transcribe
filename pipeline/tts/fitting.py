@@ -20,6 +20,11 @@ MAX_SPEED = 1.25
 # F5-TTS + the vocos vocoder output at this rate; the dub plan and track are
 # documented and validated at it.
 DUB_SAMPLE_RATE = 24000
+# The engine's native synthesis-speed range (ADR-0005): the F5 infer speed
+# argument accepts 0.5..2.0 and the stage rejects anything else before an
+# engine is ever built.
+MIN_SYNTH_SPEED = 0.5
+MAX_SYNTH_SPEED = 2.0
 # Overshoot within 0.2% of the slot is measurement noise; stretching it
 # would produce a factor the validator cannot distinguish from 1.0.
 FIT_EPSILON = 0.002

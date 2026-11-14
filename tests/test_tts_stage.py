@@ -254,6 +254,41 @@ def test_tts_stage_input_source_speaks_source_text(tmp_path, monkeypatch):
     assert run("tts", workdir, _config(tmp_path, input="source"), validate_only=True) == 0
 
 
+def test_tts_stage_synthesis_speed_flows_to_engine_plan_and_cache(tmp_path, monkeypatch):
+    """tts.speed (ADR-0005) drives the engine call, the plan contract and the
+    cache key: entries made at one speed never serve another."""
+    _voices(tmp_path)
+    workdir = _workdir(tmp_path)
+    engine = FakeEngine(default_duration=1.0)
+    monkeypatch.setattr("pipeline.stages.tts.create_tts_engine", lambda config: engine)
+
+    assert run("tts", workdir, _config(tmp_path, speed=1.6)) == 0
+
+    assert {call["speed"] for call in engine.calls} == {1.6}
+    plan = json.loads((workdir / "tts/dub_plan.json").read_text(encoding="utf-8"))
+    assert plan["synth_speed"] == pytest.approx(1.6)
+    cache_dir = workdir / ".tts-cache"
+    entries_at_1_6 = len(list(cache_dir.glob("*.wav")))
+
+    # The same workdir at the default speed is a full cache miss: the key
+    # includes the speed, so the engine synthesizes both segments again.
+    assert run("tts", workdir, _config(tmp_path)) == 0
+    assert {call["speed"] for call in engine.calls[len(engine.calls) - 2:]} == {1.0}
+    assert len(list(cache_dir.glob("*.wav"))) == entries_at_1_6 + 2
+    assert run("tts", workdir, _config(tmp_path, speed=1.6), validate_only=True) == 0
+
+
+def test_tts_stage_rejects_out_of_range_speed(tmp_path, monkeypatch):
+    _voices(tmp_path)
+    workdir = _workdir(tmp_path)
+    monkeypatch.setattr("pipeline.stages.tts.create_tts_engine", lambda config: FakeEngine())
+
+    # Config errors exit 2 before any engine is built or artifact written.
+    assert run("tts", workdir, _config(tmp_path, speed=2.5)) == 2
+    assert run("tts", workdir, _config(tmp_path, speed="fast")) == 2
+    assert not (workdir / "tts/dub_plan.json").exists()
+
+
 def test_tts_stage_requires_source_audio(tmp_path, monkeypatch):
     _voices(tmp_path)
     workdir = _workdir(tmp_path)
@@ -319,6 +354,9 @@ def test_tts_plan_and_audio_validators_reject_tampering(tmp_path, monkeypatch):
     assert _mutate(lambda p: p["segments"][0].__setitem__("text", "被篡改的文本。")) == 1
     assert _mutate(lambda p: p["segments"][0].__setitem__("slot_end", 99.0)) == 1
     assert _mutate(lambda p: p.__setitem__("schema_version", 2)) == 1
+    # The synthesis speed is part of the contract and the cache key.
+    assert _mutate(lambda p: p.pop("synth_speed")) == 1
+    assert _mutate(lambda p: p.__setitem__("synth_speed", 3.0)) == 1
     assert _mutate(lambda p: p["segments"].pop()) == 1
     assert _mutate(lambda p: p["overflow"].__setitem__("total_s", 99.0)) == 1
     # The track contract is 24 kHz mono, enforced against the plan too.

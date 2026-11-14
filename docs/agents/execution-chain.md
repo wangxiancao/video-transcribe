@@ -37,7 +37,7 @@ runner 只执行 `--stages` 明确选择的阶段，并始终按注册表顺序�
 - `segments.json`：在上述词级契约上增加从 1 开始的连续 `id`。过滤会删除整段，因此这里不再保证包含原始 transcript 的每一个词。
 - `translation.json`：`source_language/target_language` + `segments[]`；每段含 `id/start/end/source/target`。段数、ID 和时间戳必须与 `segments.json` 一致。
 - SRT：`HH:MM:SS,mmm --> HH:MM:SS,mmm`，编号连续、时间正时长且不得重叠。三份 SRT cue 数和时间轴一致；bilingual 每 cue 恰好源文、译文两行。
-- `tts/dub_plan.json`：`input/voice/sample_rate/source_duration_s/track_duration_s` + `segments[]`（每段 `id/slot_start/slot_end/text/synthesized_duration_s/speed_factor/method/placed_start/placed_end/overflow_s`）+ `overflow`（`count/total_s/ratio`）。段数、ID、槽时间戳与 `translation.json` 一致（`tts.input` 决定 `text` 对应 `target` 还是 `source` 字段）；`method ∈ {none, atempo}`；`speed_factor ≤ 1.25`（固定契约，不进配置）；`placed_start = slot_start`（不截断不位移）；`overflow_s = max(0, placed_end - slot_end)`。
+- `tts/dub_plan.json`：`input/voice/synth_speed/sample_rate/source_duration_s/track_duration_s` + `segments[]`（每段 `id/slot_start/slot_end/text/synthesized_duration_s/speed_factor/method/placed_start/placed_end/overflow_s`）+ `overflow`（`count/total_s/ratio`）。段数、ID、槽时间戳与 `translation.json` 一致（`tts.input` 决定 `text` 对应 `target` 还是 `source` 字段）；`method ∈ {none, atempo}`；`speed_factor ≤ 1.25`（固定契约，不进配置）；`synth_speed` 是原生合成速度（`tts.speed`，ADR-0005，引擎范围 0.5–2.0），参与合成缓存键；`placed_start = slot_start`（不截断不位移）；`overflow_s = max(0, placed_end - slot_end)`。
 - `tts/tts.wav`：24 kHz 单声道 PCM16 整轨；静音底长度等于源音频，末段溢出可延长整轨；时长与 plan `track_duration_s` 相差不超过 50 ms；非语音区间保持静音。
 - 视频：烧录输出必须同时含音视频流，时长与源视频相差不超过 0.5 秒。
 - `output_dub.mp4`：`media/source.mp4` 的视频流直拷 + `tts/tts.wav` 整轨替换为 AAC（96 kbit/s，24 kHz 单声道）；必须同时含音视频流，时长与源视频相差不超过 0.5 秒；配音轨超长溢出源视频超出契约门时 dub 失败，不截断语音（ADR-0003）；字幕烧录不归 dub，`output.mp4` 与 `output_dub.mp4` 相互独立。
@@ -68,5 +68,5 @@ TTS 合成缓存在 `<workdir>/.tts-cache/`，键 = 音色 + 段文本 + 合成�
 - 媒体缺失、模型缺失、 native 二进制缺失、LLM 服务启动失败均显式报错，不自动切换云端。
 - ASR/对齐器输出必须满足词级时间戳契约；异常越界词按现有 best-effort 规则钳制并警告，严重回退或空结果失败。
 - 分段全部过滤、忠实翻译无合规结果、SRT 契约破坏或烧录/配音时长漂移都会使运行非零退出。
-- tts 的变速上限 1.25× 是固定契约；超长溢出不判阶段失败，逐段记账进 plan 并在 stderr 告警，累计溢出（≤总时长 2%）由 bench 验收门量化判定。
+- tts 的变速上限 1.25× 是固定契约；原生合成速度走 `tts.speed` 配置（ADR-0005，F5 继承参考音频语速，慢参考在真实语料上无法落槽）；超长溢出不判阶段失败，逐段记账进 plan 并在 stderr 告警，累计溢出（≤总时长 2%）由 bench 验收门量化判定。
 - `output.mp4` 与 `output_dub.mp4` 都使用临时文件，验证通过后才原子替换。不要在同一 workdir 并发运行流水线。

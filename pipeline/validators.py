@@ -6,7 +6,7 @@ from typing import Any
 from pipeline.contracts import CodecError, ContractError, StageContext
 from pipeline.stages.tts import INPUT_MODES, spoken_field
 from pipeline.text_quality import has_translation_meta, is_low_information
-from pipeline.tts.fitting import DUB_SAMPLE_RATE, MAX_SPEED
+from pipeline.tts.fitting import DUB_SAMPLE_RATE, MAX_SPEED, MAX_SYNTH_SPEED, MIN_SYNTH_SPEED
 
 SCHEMA_VERSION = 1
 TIMESTAMP_TOLERANCE = 0.05
@@ -319,6 +319,14 @@ def validate_dub_plan(ctx: StageContext) -> None:
     if data.get("input") not in INPUT_MODES:
         _fail(ctx, "dub_plan", f"input must be one of {', '.join(INPUT_MODES)}")
     _text(data.get("voice"), ctx, "dub_plan", "voice")
+    # The synthesis speed explains synthesized_duration_s and completes the
+    # cache key (voice + text + speed); the engine range bounds it (ADR-0005).
+    synth_speed = _number(data.get("synth_speed"), ctx, "dub_plan", "synth_speed")
+    if not (MIN_SYNTH_SPEED <= synth_speed <= MAX_SYNTH_SPEED):
+        _fail(
+            ctx, "dub_plan",
+            f"synth_speed must be within [{MIN_SYNTH_SPEED}, {MAX_SYNTH_SPEED}]",
+        )
     sample_rate = data.get("sample_rate")
     if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
         _fail(ctx, "dub_plan", "sample_rate must be a positive integer")

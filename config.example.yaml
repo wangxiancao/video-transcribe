@@ -81,6 +81,10 @@ translation:
 tts:
   # Voice name from the library manifest (voices.json next to the clips).
   voice: 'zh-female-01'
+  # Native synthesis speed (ADR-0005). F5 inherits the reference clip's
+  # pace; a slow reference cannot fit real speech slots even at the 1.25x
+  # atempo cap, so the speed is configurable. Range 0.5..2.0, default 1.0.
+  speed: 1.0
   # Which translation.json field to speak: 'translated' (target) or 'source'.
   input: 'translated'
   # Cache synthesized segments (voice+text+speed keyed) under <workdir>/.tts-cache.
