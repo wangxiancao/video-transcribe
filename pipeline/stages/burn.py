@@ -227,11 +227,20 @@ def _burn_chunked(source, subtitle_path, video_filter, temp, chunks, encoder_arg
 
         def burn(index, cut_path):
             burned = work / f"burned-{index}.mp4"
+            # The mp4 edit list rebases each tile's decoded PTS to zero, so
+            # cues would restart from the top of the SRT in every tile.
+            # Shift PTS back onto the source's absolute timeline before the
+            # subtitles filter picks cues; the trailing setpts then rebases
+            # the burned tile for the stream-copy concat.
+            offset = boundaries[index]
+            chain = video_filter
+            if offset > 0:
+                chain = f"setpts=PTS+{offset:.3f}/TB,{video_filter}"
             result = _run(
                 [
                     _require_tool("ffmpeg"), "-hide_banner", "-loglevel",
                     "error", "-y", "-i", str(cut_path),
-                    "-vf", f"{video_filter},setpts=PTS-STARTPTS",
+                    "-vf", f"{chain},setpts=PTS-STARTPTS",
                     "-af", "asetpts=PTS-STARTPTS",
                     "-map", "0:v:0", "-map", "0:a:0",
                     *encoder_args,
