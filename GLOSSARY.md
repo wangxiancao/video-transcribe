@@ -46,6 +46,14 @@ _Avoid_: dub (unqualified), TTS video (ambiguous)
 The fixed speaker identity synthesis uses, picked from a named catalog; voice cloning (学习音色) is the optional extension that adds a new catalog entry.
 _Avoid_: speaker (ambiguous with ASR speakers), timbre
 
+**Char budget (字符预算)**:
+The maximum character count a translated segment may occupy, derived from its speech-slot duration and a natural speaking rate, so the Dubbing fits the slot without rushed synthesis (ADR-0006).
+_Avoid_: length limit (vague), compression target
+
+**Voice mapping (音色映射)**:
+Assigning each speaker of the source video to one named Voice for Dubbing, so distinct source speakers keep distinct, consistent Dubbing voices (ADR-0006).
+_Avoid_: voice cloning (that adds a new voice, this only selects one)
+
 **Drift (漂移)**:
 Error accumulating over long synthesis runs, in two accepted senses: timeline drift (subtitle/audio timestamps disagreeing with actual audio) and timbre drift (voice quality degrading as synthesis proceeds). Both are gated by acceptance.
 _Avoid_: 偏移 (ambiguous), lag
