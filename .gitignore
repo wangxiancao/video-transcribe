@@ -67,11 +67,13 @@ instance/
 .scrapy
 
 # Sphinx documentation
-# `docs/*` (not `docs/`) so the negations can re-include docs/agents/ and docs/adr/.
+# `docs/*` (not `docs/`) so the negations can re-include the tracked docs trees.
 docs/*
 !docs/agents/
 !docs/adr/
 !docs/adr/**
+!docs/research/
+!docs/research/**
 !docs/superpowers/
 !docs/superpowers/**
 
