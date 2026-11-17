@@ -47,11 +47,11 @@ The fixed speaker identity synthesis uses, picked from a named catalog; voice cl
 _Avoid_: speaker (ambiguous with ASR speakers), timbre
 
 **Char budget (字符预算)**:
-The maximum character count a translated segment may occupy, derived from its speech-slot duration and a natural speaking rate, so the Dubbing fits the slot without rushed synthesis (ADR-0006).
+The maximum character count a translated segment may occupy, derived from its speech-slot duration and a natural speaking rate, so the Dubbing fits the slot without rushed synthesis (ADR-0006; 实现已回退，未在产品中).
 _Avoid_: length limit (vague), compression target
 
 **Voice mapping (音色映射)**:
-Assigning each speaker of the source video to one named Voice for Dubbing, so distinct source speakers keep distinct, consistent Dubbing voices (ADR-0006).
+Assigning each speaker of the source video to one named Voice for Dubbing, so distinct source speakers keep distinct, consistent Dubbing voices (ADR-0006; 实现已回退，未在产品中).
 _Avoid_: voice cloning (that adds a new voice, this only selects one)
 
 **Drift (漂移)**:

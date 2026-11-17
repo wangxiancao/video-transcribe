@@ -1,6 +1,31 @@
 # Dub fidelity: budget the translation, map voices by speaker — don't speed up synthesis and don't clone across languages
 
-Status: accepted (2026-11-15)
+Status: superseded (2026-11-17) — accepted 2026-11-15, implementation rolled back 2026-11-17
+
+## Rollback record
+
+The implementation lived on `feat/adr0006-impl` (15 commits, never merged
+to `main`; branch deleted 2026-11-17). It was abandoned after full-content
+measurement and the human listening gate, all against this ADR's own
+acceptance targets:
+
+- Full-1h budget adherence **39.8% vs the ≥45% gate** (the stratified
+  probe's 49.2% did not generalize); median pace 5.21 chars/s vs ≤5.0;
+  translate wall **+28.6% vs ≤+25%**.
+- Human listening gates failed: 中英语速不一致 (a single global
+  `tts.speed` cannot match per-slot pacing), the dub output carries no
+  subtitles (ADR-0003's split — a product gap for verification), and the
+  Mandarin carries a Cantonese accent **inherited from the `zh-male-01`
+  reference clip itself** (an HK news clip; the translation text was
+  clean — the voice-library asset is the defect).
+
+Evidence preserved on `main`: probe `bench/results/v4_8/` (budget
+strategies measurement), the two research notes under `docs/research/`,
+and the two implementation plans under `docs/superpowers/plans/` — all
+historical. Reopening this direction needs, at minimum: a stronger
+translation model (or a cheaper enforcement that clears 45% on full
+content) and a standard-Mandarin male reference clip in the voice
+library.
 
 ## Context
 
